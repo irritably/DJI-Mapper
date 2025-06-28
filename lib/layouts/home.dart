@@ -8,6 +8,7 @@ import 'package:dji_mapper/layouts/aircraft.dart';
 import 'package:dji_mapper/layouts/camera.dart';
 import 'package:dji_mapper/layouts/export.dart';
 import 'package:dji_mapper/layouts/info.dart';
+import 'package:dji_mapper/layouts/orbit.dart';
 import 'package:dji_mapper/main.dart';
 import 'package:dji_mapper/presets/preset_manager.dart';
 import 'package:dji_mapper/shared/map_provider.dart';
@@ -48,7 +49,7 @@ class _HomeLayoutState extends State<HomeLayout> with TickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 4, vsync: this);
+    _tabController = TabController(length: 5, vsync: this);
     _getLocationAndMoveMap();
 
     _selectedMapLayer =
@@ -183,6 +184,39 @@ class _HomeLayoutState extends State<HomeLayout> with TickerProviderStateMixin {
   }
 
   void _buildMarkers(ValueListenables listenables) {
+    // Handle orbit mission
+    if (listenables.orbitMode && listenables.orbitPoi != null) {
+      var orbitWaypoints = DroneMappingEngine.generateOrbitWaypoints(
+        poi: listenables.orbitPoi!,
+        radiusMeters: listenables.orbitRadius,
+        numberOfPoints: listenables.orbitPoints,
+        clockwise: listenables.orbitClockwise,
+      );
+      
+      listenables.photoLocations = orbitWaypoints;
+      
+      // Create orbit flight line (close the circle)
+      var orbitPath = List<LatLng>.from(orbitWaypoints);
+      orbitPath.add(orbitWaypoints.first); // Close the circle
+      
+      listenables.flightLine = Polyline(
+        points: orbitPath,
+        strokeWidth: 3,
+        color: Theme.of(context).colorScheme.tertiary,
+      );
+      
+      _buildOrbitMarkers(orbitWaypoints, listenables);
+      return;
+    }
+
+    // Handle regular survey mission
+    if (listenables.polygon.length < 3) {
+      listenables.photoLocations.clear();
+      _photoMarkers.clear();
+      listenables.flightLine = null;
+      return;
+    }
+
     var droneMapping = DroneMappingEngine(
       altitude: listenables.altitude.toDouble(),
       forwardOverlap: listenables.forwardOverlap / 100,
@@ -231,12 +265,42 @@ class _HomeLayoutState extends State<HomeLayout> with TickerProviderStateMixin {
         color: Theme.of(context).colorScheme.tertiary);
   }
 
+  void _buildOrbitMarkers(List<LatLng> orbitWaypoints, ValueListenables listenables) {
+    _photoMarkers.clear();
+    for (int i = 0; i < orbitWaypoints.length; i++) {
+      var photoLocation = orbitWaypoints[i];
+      _photoMarkers.add(Marker(
+        point: photoLocation,
+        height: 25,
+        alignment: Alignment.center,
+        rotate: false,
+        child: Container(
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.secondary.withAlpha(179),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                listenables.createCameraPoints ? Icons.photo_camera : Icons.place_sharp,
+                size: 25,
+                color: Theme.of(context).colorScheme.onSecondaryContainer,
+              ),
+            ],
+          ),
+        ),
+      ));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Consumer2<ValueListenables, MapProvider>(
       builder: (context, listenables, mapProvider, _) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (listenables.polygon.length > 2 && listenables.altitude >= 5) {
+          if ((listenables.orbitMode && listenables.orbitPoi != null) ||
+              (!listenables.orbitMode && listenables.polygon.length > 2 && listenables.altitude >= 5)) {
             _buildMarkers(listenables);
           } else {
             listenables.photoLocations.clear();
@@ -252,9 +316,16 @@ class _HomeLayoutState extends State<HomeLayout> with TickerProviderStateMixin {
               mapController: mapProvider.mapController,
               options: MapOptions(
                 onTap: (tapPosition, point) => {
-                  setState(() {
-                    listenables.polygon.add(point);
-                  }),
+                  // Handle POI selection for orbit missions
+                  if (listenables.orbitMode && listenables.selectingPoi) {
+                    listenables.orbitPoi = point;
+                    listenables.selectingPoi = false;
+                  } else if (!listenables.orbitMode) {
+                    // Handle polygon creation for survey missions
+                    setState(() {
+                      listenables.polygon.add(point);
+                    });
+                  }
                 },
               ),
               children: [
@@ -271,42 +342,71 @@ class _HomeLayoutState extends State<HomeLayout> with TickerProviderStateMixin {
                         : 'https://{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
                     userAgentPackageName: 'com.yarosfpv.dji_mapper',
                     subdomains: const ['mt0', 'mt1', 'mt2', 'mt3']),
-                PolygonLayer(polygons: [
-                  if (listenables.polygon.length > 1)
-                    Polygon(
-                        points: listenables.polygon,
-                        color:
-                            Theme.of(context).colorScheme.primary.withAlpha(77),
-                        borderColor: Theme.of(context).colorScheme.primary,
-                        borderStrokeWidth: 3),
-                ]),
+                // Show polygon for survey missions
+                if (!listenables.orbitMode)
+                  PolygonLayer(polygons: [
+                    if (listenables.polygon.length > 1)
+                      Polygon(
+                          points: listenables.polygon,
+                          color:
+                              Theme.of(context).colorScheme.primary.withAlpha(77),
+                          borderColor: Theme.of(context).colorScheme.primary,
+                          borderStrokeWidth: 3),
+                  ]),
+                // Show orbit POI marker
+                if (listenables.orbitMode && listenables.orbitPoi != null)
+                  MarkerLayer(markers: [
+                    Marker(
+                      point: listenables.orbitPoi!,
+                      height: 40,
+                      width: 40,
+                      alignment: Alignment.center,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).colorScheme.error,
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: Theme.of(context).colorScheme.onError,
+                            width: 2,
+                          ),
+                        ),
+                        child: Icon(
+                          Icons.my_location,
+                          color: Theme.of(context).colorScheme.onError,
+                          size: 24,
+                        ),
+                      ),
+                    ),
+                  ]),
                 PolylineLayer(polylines: [
                   if (listenables.flightLine != null)
                     listenables.flightLine ?? Polyline(points: [])
                 ]),
                 if (listenables.showPoints) MarkerLayer(markers: _photoMarkers),
-                DragMarkers(markers: [
-                  for (var point in listenables.polygon)
-                    DragMarker(
-                      size: const Size(30, 30),
-                      point: point,
-                      alignment: Alignment.topCenter,
-                      builder: (_, coords, b) => GestureDetector(
-                          onSecondaryTap: () => setState(() {
-                                if (listenables.polygon.contains(point)) {
-                                  listenables.polygon.remove(point);
-                                }
-                              }),
-                          child: const Icon(Icons.place, size: 30)),
-                      onDragUpdate: (details, latLng) => {
-                        if (listenables.polygon.contains(point))
-                          {
-                            listenables.polygon[
-                                listenables.polygon.indexOf(point)] = latLng
-                          }
-                      },
-                    ),
-                ]),
+                // Only show drag markers for survey missions
+                if (!listenables.orbitMode)
+                  DragMarkers(markers: [
+                    for (var point in listenables.polygon)
+                      DragMarker(
+                        size: const Size(30, 30),
+                        point: point,
+                        alignment: Alignment.topCenter,
+                        builder: (_, coords, b) => GestureDetector(
+                            onSecondaryTap: () => setState(() {
+                                  if (listenables.polygon.contains(point)) {
+                                    listenables.polygon.remove(point);
+                                  }
+                                }),
+                            child: const Icon(Icons.place, size: 30)),
+                        onDragUpdate: (details, latLng) => {
+                          if (listenables.polygon.contains(point))
+                            {
+                              listenables.polygon[
+                                  listenables.polygon.indexOf(point)] = latLng
+                            }
+                        },
+                      ),
+                  ]),
                 Align(
                   alignment: Alignment.topLeft,
                   child: Padding(
@@ -448,7 +548,12 @@ class _HomeLayoutState extends State<HomeLayout> with TickerProviderStateMixin {
                           child: InkWell(
                               borderRadius: BorderRadius.circular(10),
                               onTap: () => setState(() {
-                                    listenables.polygon.clear();
+                                    if (listenables.orbitMode) {
+                                      listenables.orbitPoi = null;
+                                      listenables.selectingPoi = false;
+                                    } else {
+                                      listenables.polygon.clear();
+                                    }
                                     _photoMarkers.clear();
                                   }),
                               child: Padding(
@@ -474,10 +579,12 @@ class _HomeLayoutState extends State<HomeLayout> with TickerProviderStateMixin {
                 children: [
                   TabBar(
                     controller: _tabController,
+                    isScrollable: true,
                     tabs: const [
                       Tab(icon: Icon(Icons.info_outline), text: 'Info'),
                       Tab(icon: Icon(Icons.airplanemode_on), text: 'Aircraft'),
                       Tab(icon: Icon(Icons.photo_camera), text: 'Camera'),
+                      Tab(icon: Icon(Icons.360), text: 'Orbit'),
                       Tab(icon: Icon(Icons.file_copy), text: 'File'),
                     ],
                   ),
@@ -488,6 +595,7 @@ class _HomeLayoutState extends State<HomeLayout> with TickerProviderStateMixin {
                         Info(),
                         AircraftBar(),
                         CameraBar(),
+                        OrbitBar(),
                         ExportBar()
                       ]))
                 ],

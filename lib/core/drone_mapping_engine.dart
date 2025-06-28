@@ -299,6 +299,60 @@ class DroneMappingEngine {
     return verticalWaypoints;
   }
 
+  /// Generate orbit waypoints around a point of interest
+  static List<LatLng> generateOrbitWaypoints({
+    required LatLng poi,
+    required double radiusMeters,
+    required int numberOfPoints,
+    required bool clockwise,
+  }) {
+    if (numberOfPoints < 3) {
+      throw ArgumentError('Number of points must be at least 3');
+    }
+
+    List<LatLng> waypoints = [];
+    
+    // Earth's radius in meters
+    const double earthRadius = 6371000.0;
+    
+    // Convert POI to radians
+    double poiLatRad = poi.latitude * pi / 180;
+    double poiLngRad = poi.longitude * pi / 180;
+    
+    // Calculate angular distance
+    double angularDistance = radiusMeters / earthRadius;
+    
+    // Generate waypoints around the circle
+    for (int i = 0; i < numberOfPoints; i++) {
+      // Calculate bearing for this point
+      double bearing = (2 * pi * i / numberOfPoints);
+      
+      // Reverse direction if counter-clockwise
+      if (!clockwise) {
+        bearing = 2 * pi - bearing;
+      }
+      
+      // Calculate new position using spherical trigonometry
+      double newLatRad = asin(
+        sin(poiLatRad) * cos(angularDistance) +
+        cos(poiLatRad) * sin(angularDistance) * cos(bearing)
+      );
+      
+      double newLngRad = poiLngRad + atan2(
+        sin(bearing) * sin(angularDistance) * cos(poiLatRad),
+        cos(angularDistance) - sin(poiLatRad) * sin(newLatRad)
+      );
+      
+      // Convert back to degrees
+      double newLat = newLatRad * 180 / pi;
+      double newLng = newLngRad * 180 / pi;
+      
+      waypoints.add(LatLng(newLat, newLng));
+    }
+    
+    return waypoints;
+  }
+
   static double calculateTotalDistance(List<LatLng> waypoints) {
     if (waypoints.length < 2) return 0.0;
     double totalDistance = 0.0;

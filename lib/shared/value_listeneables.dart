@@ -169,5 +169,61 @@ class ValueListenables extends ChangeNotifier {
     _selectedCameraPreset.value = value;
   }
 
+  /// Orbit mission mode
+  final _orbitMode = ValueNotifier<bool>(false);
+  bool get orbitMode => _orbitMode.value;
+  set orbitMode(bool value) {
+    _orbitMode.value = value;
+    notifyListeners();
+  }
+
+  /// Orbit POI (Point of Interest)
+  final _orbitPoi = ValueNotifier<LatLng?>(null);
+  LatLng? get orbitPoi => _orbitPoi.value;
+  set orbitPoi(LatLng? value) {
+    _orbitPoi.value = value;
+    notifyListeners();
+  }
+
+  /// Orbit radius in meters
+  final _orbitRadius = ValueNotifier<double>(100.0);
+  double get orbitRadius => _orbitRadius.value;
+  set orbitRadius(double value) {
+    _orbitRadius.value = value;
+    notifyListeners();
+  }
+
+  /// Number of orbit waypoints
+  final _orbitPoints = ValueNotifier<int>(8);
+  int get orbitPoints => _orbitPoints.value;
+  set orbitPoints(int value) {
+    _orbitPoints.value = value;
+    notifyListeners();
+  }
+
+  /// Orbit direction (true = clockwise, false = counter-clockwise)
+  final _orbitClockwise = ValueNotifier<bool>(true);
+  bool get orbitClockwise => _orbitClockwise.value;
+  set orbitClockwise(bool value) {
+    _orbitClockwise.value = value;
+    notifyListeners();
+  }
+
+  /// Whether to face POI during orbit
+  final _orbitFacePoi = ValueNotifier<bool>(true);
+  bool get orbitFacePoi => _orbitFacePoi.value;
+  set orbitFacePoi(bool value) {
+    _orbitFacePoi.value = value;
+    notifyListeners();
+  }
+
+  /// Whether POI selection is active
+  final _selectingPoi = ValueNotifier<bool>(false);
+  bool get selectingPoi => _selectingPoi.value;
+  set selectingPoi(bool value) {
+    _selectingPoi.value = value;
+    notifyListeners();
+  }
+
   void notify() => notifyListeners();
 }

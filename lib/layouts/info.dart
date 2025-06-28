@@ -18,11 +18,19 @@ class _InfoState extends State<Info> {
       var totalDistance = 0;
       var area = 0;
       var recommendedShutterSpeed = "0";
-      if (listenables.polygon.length > 2) {
+      
+      if (listenables.orbitMode && listenables.orbitPoi != null) {
+        // Calculate orbit circumference
+        totalDistance = (2 * 3.14159 * listenables.orbitRadius).round();
+        area = 0; // Orbit missions don't have an area
+      } else if (listenables.polygon.length > 2) {
         totalDistance = DroneMappingEngine.calculateTotalDistance(
                 listenables.flightLine?.points ?? [])
             .round();
         area = DroneMappingEngine.calculateArea(listenables.polygon).round();
+      }
+      
+      if (listenables.photoLocations.isNotEmpty) {
         recommendedShutterSpeed =
             DroneMappingEngine.calculateRecommendedShutterSpeed(
           altitude: listenables.altitude,
@@ -36,30 +44,50 @@ class _InfoState extends State<Info> {
       return Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          SwitchListTile(
-              title: const Text("Create Photo Points"),
-              value: listenables.createCameraPoints,
-              onChanged: (value) {
-                setState(() {
-                  listenables.createCameraPoints = value;
-                });
-              }),
-          SwitchListTile(
-              title: Text((listenables.createCameraPoints)?"Show Photo Points":"Show Waypoints" ),
-              value: listenables.showPoints,
-              onChanged: (value) {
-                setState(() {
-                  listenables.showPoints = value;
-                });
-              }),
-          SwitchListTile(
-              title: const Text("Fill Grid"),
-              value: listenables.fillGrid,
-              onChanged: (value) {
-                setState(() {
-                  listenables.fillGrid = value;
-                });
-              }),
+          if (!listenables.orbitMode) ...[
+            SwitchListTile(
+                title: const Text("Create Photo Points"),
+                value: listenables.createCameraPoints,
+                onChanged: (value) {
+                  setState(() {
+                    listenables.createCameraPoints = value;
+                  });
+                }),
+            SwitchListTile(
+                title: Text((listenables.createCameraPoints)?"Show Photo Points":"Show Waypoints" ),
+                value: listenables.showPoints,
+                onChanged: (value) {
+                  setState(() {
+                    listenables.showPoints = value;
+                  });
+                }),
+            SwitchListTile(
+                title: const Text("Fill Grid"),
+                value: listenables.fillGrid,
+                onChanged: (value) {
+                  setState(() {
+                    listenables.fillGrid = value;
+                  });
+                }),
+          ] else ...[
+            SwitchListTile(
+                title: const Text("Create Photo Points"),
+                subtitle: const Text("Take photos at each orbit waypoint"),
+                value: listenables.createCameraPoints,
+                onChanged: (value) {
+                  setState(() {
+                    listenables.createCameraPoints = value;
+                  });
+                }),
+            SwitchListTile(
+                title: const Text("Show Orbit Points"),
+                value: listenables.showPoints,
+                onChanged: (value) {
+                  setState(() {
+                    listenables.showPoints = value;
+                  });
+                }),
+          ],
           Card(
               child: Padding(
             padding: const EdgeInsets.all(8.0),
@@ -73,8 +101,10 @@ class _InfoState extends State<Info> {
               const Divider(),
               Text("Flight distance: $totalDistance m",
                   style: const TextStyle(fontSize: 16)),
-              const Divider(),
-              Text("Area: $area m²", style: const TextStyle(fontSize: 16)),
+              if (!listenables.orbitMode) ...[
+                const Divider(),
+                Text("Area: $area m²", style: const TextStyle(fontSize: 16)),
+              ],
               const Divider(),
               Text(
                   "Estimated flight time: ${(((totalDistance / listenables.speed) + (listenables.photoLocations.length * listenables.delayAtWaypoint)) / 60).round()} minutes",

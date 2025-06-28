@@ -206,26 +206,52 @@ class ExportBarState extends State<ExportBar> {
     var waypoints = <litchi.Waypoint>[];
 
     for (var photoLocation in listenables.photoLocations) {
-      waypoints.add(litchi.Waypoint(
-          latitude: photoLocation.latitude,
-          longitude: photoLocation.longitude,
-          altitude: listenables.altitude,
-          speed: listenables.speed.toInt(),
-          gimbalPitch: listenables.cameraAngle,
-          gimbalMode: litchi.GimbalMode.interpolate,
-          actions: [
-            if (listenables.delayAtWaypoint > 0)
-              litchi.Action(
-                  actionType: litchi.ActionType.stayFor,
+      var actions = <litchi.Action>[];
+      
+      // Add delay action if specified
+      if (listenables.delayAtWaypoint > 0) {
+        actions.add(litchi.Action(
+          actionType: litchi.ActionType.stayFor,
+          actionParam: listenables.delayAtWaypoint.toDouble() * 1000, // Litchi uses milliseconds
+        ));
+      }
+      
+      // Add photo action if camera points are enabled
+      if (listenables.createCameraPoints) {
+        actions.add(litchi.Action(actionType: litchi.ActionType.takePhoto));
+      }
 
-                  // Litchi uses milliseconds for delay time
-                  actionParam: listenables.delayAtWaypoint.toDouble() * 1000),
-            if (listenables.createCameraPoints)
-              litchi.Action(actionType: litchi.ActionType.takePhoto)
-          ]));
+      waypoints.add(litchi.Waypoint(
+        latitude: photoLocation.latitude,
+        longitude: photoLocation.longitude,
+        altitude: listenables.altitude,
+        speed: listenables.speed.toInt(),
+        gimbalPitch: listenables.cameraAngle,
+        gimbalMode: _getLitchiGimbalMode(listenables),
+        poi: _getLitchiPoi(listenables),
+        actions: actions,
+      ));
     }
 
     return waypoints;
+  }
+
+  litchi.GimbalMode _getLitchiGimbalMode(ValueListenables listenables) {
+    if (listenables.orbitMode && listenables.orbitFacePoi) {
+      return litchi.GimbalMode.focusPoi;
+    }
+    return litchi.GimbalMode.interpolate;
+  }
+
+  litchi.Poi? _getLitchiPoi(ValueListenables listenables) {
+    if (listenables.orbitMode && listenables.orbitFacePoi && listenables.orbitPoi != null) {
+      return litchi.Poi(
+        latitude: listenables.orbitPoi!.latitude,
+        longitude: listenables.orbitPoi!.longitude,
+        altitude: listenables.altitude,
+      );
+    }
+    return null;
   }
 
   List<Placemark> _generateDjiPlacemarks(ValueListenables listenables) {
@@ -233,50 +259,86 @@ class ExportBarState extends State<ExportBar> {
 
     for (var photoLocation in listenables.photoLocations) {
       int id = listenables.photoLocations.indexOf(photoLocation);
+      
+      var actions = <Action>[];
+      
+      // Set gimbal angle on first waypoint
+      if (id == 0) {
+        actions.add(Action(
+          id: id,
+          actionFunction: ActionFunction.gimbalEvenlyRotate,
+          actionParams: GimbalRotateParams(
+            pitch: listenables.cameraAngle.toDouble(),
+            payloadPosition: 0,
+          ),
+        ));
+      }
+      
+      // Add delay action if specified
+      if (listenables.delayAtWaypoint > 0) {
+        actions.add(Action(
+          id: id,
+          actionFunction: ActionFunction.hover,
+          actionParams: HoverParams(hoverTime: listenables.delayAtWaypoint),
+        ));
+      }
+      
+      // Add photo action if camera points are enabled
+      if (listenables.createCameraPoints) {
+        actions.add(Action(
+          id: id,
+          actionFunction: ActionFunction.takePhoto,
+          actionParams: CameraControlParams(payloadPosition: 0),
+        ));
+      }
+
       placemarks.add(Placemark(
-          point: WaypointPoint(
-              longitude: photoLocation.longitude,
-              latitude: photoLocation.latitude),
-          index: id,
-          height: listenables.altitude,
-          speed: listenables.speed,
-          headingParam: HeadingParam(
-              headingMode: HeadingMode.followWayline,
-              headingPathMode: HeadingPathMode.followBadArc),
-          turnParam: TurnParam(
-              waypointTurnMode:
-                  WaypointTurnMode.toPointAndStopWithDiscontinuityCurvature,
-              turnDampingDistance: 0),
-          useStraightLine: true,
-          actionGroup: ActionGroup(
-              id: 0,
-              startIndex: id,
-              endIndex: id,
-              actions: [
-                if (id == 0)
-                  Action(
-                      id: id,
-                      actionFunction: ActionFunction.gimbalEvenlyRotate,
-                      actionParams: GimbalRotateParams(
-                          pitch: listenables.cameraAngle.toDouble(),
-                          payloadPosition: 0)),
-                if (listenables.delayAtWaypoint > 0)
-                  Action(
-                      id: id,
-                      actionFunction: ActionFunction.hover,
-                      actionParams:
-                          HoverParams(hoverTime: listenables.delayAtWaypoint)),
-                if (listenables.createCameraPoints)
-                  Action(
-                      id: id,
-                      actionFunction: ActionFunction.takePhoto,
-                      actionParams: CameraControlParams(payloadPosition: 0)),
-              ],
-              mode: ActionMode.sequence,
-              trigger: ActionTriggerType.reachPoint)));
+        point: WaypointPoint(
+          longitude: photoLocation.longitude,
+          latitude: photoLocation.latitude,
+        ),
+        index: id,
+        height: listenables.altitude,
+        speed: listenables.speed,
+        headingParam: _getDjiHeadingParam(listenables),
+        turnParam: TurnParam(
+          waypointTurnMode: WaypointTurnMode.toPointAndStopWithDiscontinuityCurvature,
+          turnDampingDistance: 0,
+        ),
+        useStraightLine: true,
+        actionGroup: actions.isNotEmpty ? ActionGroup(
+          id: 0,
+          startIndex: id,
+          endIndex: id,
+          actions: actions,
+          mode: ActionMode.sequence,
+          trigger: ActionTriggerType.reachPoint,
+        ) : null,
+      ));
     }
 
     return placemarks;
+  }
+
+  HeadingParam _getDjiHeadingParam(ValueListenables listenables) {
+    if (listenables.orbitMode && listenables.orbitFacePoi && listenables.orbitPoi != null) {
+      return HeadingParam(
+        headingMode: HeadingMode.towardPOI,
+        headingPathMode: HeadingPathMode.followBadArc,
+        headingAngleEnable: false,
+        poiPoint: PoiPoint(
+          longitude: listenables.orbitPoi!.longitude,
+          latitude: listenables.orbitPoi!.latitude,
+          height: listenables.altitude.toDouble(),
+        ),
+      );
+    }
+    
+    return HeadingParam(
+      headingMode: HeadingMode.followWayline,
+      headingPathMode: HeadingPathMode.followBadArc,
+      headingAngleEnable: false,
+    );
   }
 
   Future<void> _importFromKml(ValueListenables listenables) async {
@@ -492,32 +554,34 @@ class ExportBarState extends State<ExportBar> {
                   onPressed: () => _exportForLithi(listenables),
                   child: const Text("Save as Litchi Mission")),
             ),
-            const Padding(
-              padding: EdgeInsets.all(8.0),
-              child: Text("Import/Export Mapping Area",
-                  style: TextStyle(fontSize: 20)),
-            ),
-            Wrap(
-              alignment: WrapAlignment.center,
-              runAlignment: WrapAlignment.center,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.all(4.0),
-                  child: Tooltip(
-                    message: "This will override the current mapping area",
-                    child: ElevatedButton(
-                        onPressed: () => _importFromKml(listenables),
-                        child: const Text("Import from KML")),
+            if (!listenables.orbitMode) ...[
+              const Padding(
+                padding: EdgeInsets.all(8.0),
+                child: Text("Import/Export Mapping Area",
+                    style: TextStyle(fontSize: 20)),
+              ),
+              Wrap(
+                alignment: WrapAlignment.center,
+                runAlignment: WrapAlignment.center,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.all(4.0),
+                    child: Tooltip(
+                      message: "This will override the current mapping area",
+                      child: ElevatedButton(
+                          onPressed: () => _importFromKml(listenables),
+                          child: const Text("Import from KML")),
+                    ),
                   ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.all(4.0),
-                  child: ElevatedButton(
-                      onPressed: () => _exportAreaToKml(listenables),
-                      child: const Text("Export to KML")),
-                ),
-              ],
-            ),
+                  Padding(
+                    padding: const EdgeInsets.all(4.0),
+                    child: ElevatedButton(
+                        onPressed: () => _exportAreaToKml(listenables),
+                        child: const Text("Export to KML")),
+                  ),
+                ],
+              ),
+            ],
             Padding(
               padding: const EdgeInsets.all(16.0),
               child: Container(
