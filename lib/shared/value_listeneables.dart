@@ -225,5 +225,61 @@ class ValueListenables extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Facade mission mode
+  final _facadeMode = ValueNotifier<bool>(false);
+  bool get facadeMode => _facadeMode.value;
+  set facadeMode(bool value) {
+    _facadeMode.value = value;
+    notifyListeners();
+  }
+
+  /// Facade line points
+  final _facadeLine = ValueNotifier<List<LatLng>>([]);
+  List<LatLng> get facadeLine => _facadeLine.value;
+  set facadeLine(List<LatLng> value) {
+    _facadeLine.value = value;
+    notifyListeners();
+  }
+
+  /// Facade height in meters
+  final _facadeHeight = ValueNotifier<int>(30);
+  int get facadeHeight => _facadeHeight.value;
+  set facadeHeight(int value) {
+    _facadeHeight.value = value;
+    notifyListeners();
+  }
+
+  /// Distance from building in meters
+  final _facadeDistanceFromBuilding = ValueNotifier<double>(20.0);
+  double get facadeDistanceFromBuilding => _facadeDistanceFromBuilding.value;
+  set facadeDistanceFromBuilding(double value) {
+    _facadeDistanceFromBuilding.value = value;
+    notifyListeners();
+  }
+
+  /// Facade front overlap percentage
+  final _facadeFrontOverlap = ValueNotifier<int>(80);
+  int get facadeFrontOverlap => _facadeFrontOverlap.value;
+  set facadeFrontOverlap(int value) {
+    _facadeFrontOverlap.value = value;
+    notifyListeners();
+  }
+
+  /// Facade side overlap percentage
+  final _facadeSideOverlap = ValueNotifier<int>(60);
+  int get facadeSideOverlap => _facadeSideOverlap.value;
+  set facadeSideOverlap(int value) {
+    _facadeSideOverlap.value = value;
+    notifyListeners();
+  }
+
+  /// Facade camera pitch in degrees
+  final _facadeCameraPitch = ValueNotifier<int>(-45);
+  int get facadeCameraPitch => _facadeCameraPitch.value;
+  set facadeCameraPitch(int value) {
+    _facadeCameraPitch.value = value;
+    notifyListeners();
+  }
+
   void notify() => notifyListeners();
 }

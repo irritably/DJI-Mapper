@@ -299,6 +299,196 @@ class DroneMappingEngine {
     return verticalWaypoints;
   }
 
+  /// Generate facade waypoints along a building facade
+  static List<LatLng> generateFacadeWaypoints({
+    required List<LatLng> facadeLine,
+    required double altitude,
+    required int facadeHeight,
+    required double distanceFromBuilding,
+    required double frontOverlap,
+    required double sideOverlap,
+    required double sensorWidth,
+    required double sensorHeight,
+    required double focalLength,
+    required int imageWidth,
+    required int imageHeight,
+    required bool createCameraPoints,
+  }) {
+    if (facadeLine.length < 2) return [];
+
+    // Calculate GSD and footprint
+    double gsdX = (altitude * sensorWidth) / (imageWidth * focalLength);
+    double gsdY = (altitude * sensorHeight) / (imageHeight * focalLength);
+    double footprintWidth = gsdX * imageWidth;
+    double footprintHeight = gsdY * imageHeight;
+
+    // Calculate spacing between waypoints
+    double horizontalSpacing = footprintWidth * (1 - frontOverlap / 100);
+    double verticalSpacing = footprintHeight * (1 - sideOverlap / 100);
+
+    // Calculate number of vertical levels needed
+    int numLevels = (facadeHeight / verticalSpacing).ceil();
+
+    List<LatLng> waypoints = [];
+    
+    // Convert facade line to local coordinates
+    var localFacadeLine = _latLngToMeters(facadeLine);
+    var origin = facadeLine[0];
+
+    // Calculate total length of facade line
+    double totalLength = 0;
+    for (int i = 0; i < localFacadeLine.length - 1; i++) {
+      double dx = localFacadeLine[i + 1].x - localFacadeLine[i].x;
+      double dy = localFacadeLine[i + 1].y - localFacadeLine[i].y;
+      totalLength += sqrt(dx * dx + dy * dy);
+    }
+
+    // Calculate number of horizontal waypoints needed
+    int numHorizontalPoints = createCameraPoints 
+        ? (totalLength / horizontalSpacing).ceil() + 1
+        : 2; // Just start and end points if not creating camera points
+
+    // Generate waypoints for each level
+    bool reverseDirection = false;
+    
+    for (int level = 0; level < numLevels; level++) {
+      double currentHeight = altitude + (level * verticalSpacing);
+      
+      List<LatLng> levelWaypoints = [];
+      
+      if (createCameraPoints) {
+        // Generate waypoints along the facade line at regular intervals
+        for (int i = 0; i < numHorizontalPoints; i++) {
+          double t = i / (numHorizontalPoints - 1);
+          LatLng facadePoint = _interpolateAlongFacadeLine(facadeLine, t);
+          LatLng offsetPoint = _offsetPointFromFacade(facadeLine, facadePoint, distanceFromBuilding);
+          levelWaypoints.add(LatLng(offsetPoint.latitude, offsetPoint.longitude));
+        }
+      } else {
+        // Just start and end points
+        LatLng startFacadePoint = facadeLine.first;
+        LatLng endFacadePoint = facadeLine.last;
+        LatLng startOffsetPoint = _offsetPointFromFacade(facadeLine, startFacadePoint, distanceFromBuilding);
+        LatLng endOffsetPoint = _offsetPointFromFacade(facadeLine, endFacadePoint, distanceFromBuilding);
+        levelWaypoints.add(startOffsetPoint);
+        levelWaypoints.add(endOffsetPoint);
+      }
+      
+      // Reverse direction for boustrophedon pattern
+      if (reverseDirection) {
+        levelWaypoints = levelWaypoints.reversed.toList();
+      }
+      
+      waypoints.addAll(levelWaypoints);
+      reverseDirection = !reverseDirection;
+    }
+
+    return waypoints;
+  }
+
+  /// Interpolate a point along the facade line at parameter t (0 to 1)
+  static LatLng _interpolateAlongFacadeLine(List<LatLng> facadeLine, double t) {
+    if (t <= 0) return facadeLine.first;
+    if (t >= 1) return facadeLine.last;
+
+    // Convert to local coordinates for easier calculation
+    var localPoints = _latLngToMeters(facadeLine);
+    var origin = facadeLine[0];
+
+    // Calculate total length
+    double totalLength = 0;
+    List<double> segmentLengths = [];
+    for (int i = 0; i < localPoints.length - 1; i++) {
+      double dx = localPoints[i + 1].x - localPoints[i].x;
+      double dy = localPoints[i + 1].y - localPoints[i].y;
+      double length = sqrt(dx * dx + dy * dy);
+      segmentLengths.add(length);
+      totalLength += length;
+    }
+
+    // Find target distance along the line
+    double targetDistance = t * totalLength;
+    double currentDistance = 0;
+
+    // Find which segment contains the target point
+    for (int i = 0; i < segmentLengths.length; i++) {
+      if (currentDistance + segmentLengths[i] >= targetDistance) {
+        // Interpolate within this segment
+        double segmentT = (targetDistance - currentDistance) / segmentLengths[i];
+        Point p1 = localPoints[i];
+        Point p2 = localPoints[i + 1];
+        Point interpolated = Point(
+          p1.x + (p2.x - p1.x) * segmentT,
+          p1.y + (p2.y - p1.y) * segmentT,
+        );
+        
+        // Convert back to LatLng
+        var result = _metersToLatLng([interpolated], origin);
+        return result[0];
+      }
+      currentDistance += segmentLengths[i];
+    }
+
+    return facadeLine.last;
+  }
+
+  /// Offset a point perpendicular to the facade line by the specified distance
+  static LatLng _offsetPointFromFacade(List<LatLng> facadeLine, LatLng point, double distance) {
+    // Find the closest segment on the facade line
+    var localFacadeLine = _latLngToMeters(facadeLine);
+    var localPoint = _latLngToMeters([point])[0];
+    var origin = facadeLine[0];
+
+    double minDistance = double.infinity;
+    Point? closestPoint;
+    Point? perpendicularDirection;
+
+    for (int i = 0; i < localFacadeLine.length - 1; i++) {
+      Point p1 = localFacadeLine[i];
+      Point p2 = localFacadeLine[i + 1];
+      
+      // Calculate perpendicular direction (90 degrees to the right of the segment)
+      double dx = p2.x - p1.x;
+      double dy = p2.y - p1.y;
+      double length = sqrt(dx * dx + dy * dy);
+      
+      if (length > 0) {
+        // Normalize and rotate 90 degrees clockwise
+        double perpX = dy / length;
+        double perpY = -dx / length;
+        
+        // Calculate distance from point to line segment
+        double t = ((localPoint.x - p1.x) * dx + (localPoint.y - p1.y) * dy) / (length * length);
+        t = t.clamp(0.0, 1.0);
+        
+        Point closestOnSegment = Point(p1.x + t * dx, p1.y + t * dy);
+        double distToSegment = sqrt(
+          pow(localPoint.x - closestOnSegment.x, 2) + 
+          pow(localPoint.y - closestOnSegment.y, 2)
+        );
+        
+        if (distToSegment < minDistance) {
+          minDistance = distToSegment;
+          closestPoint = closestOnSegment;
+          perpendicularDirection = Point(perpX, perpY);
+        }
+      }
+    }
+
+    if (closestPoint != null && perpendicularDirection != null) {
+      // Offset the point by the specified distance in the perpendicular direction
+      Point offsetPoint = Point(
+        closestPoint.x + perpendicularDirection.x * distance,
+        closestPoint.y + perpendicularDirection.y * distance,
+      );
+      
+      var result = _metersToLatLng([offsetPoint], origin);
+      return result[0];
+    }
+
+    return point; // Fallback if calculation fails
+  }
+
   /// Generate orbit waypoints around a point of interest
   static List<LatLng> generateOrbitWaypoints({
     required LatLng poi,

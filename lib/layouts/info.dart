@@ -19,7 +19,13 @@ class _InfoState extends State<Info> {
       var area = 0;
       var recommendedShutterSpeed = "0";
       
-      if (listenables.orbitMode && listenables.orbitPoi != null) {
+      if (listenables.facadeMode && listenables.facadeLine.length >= 2) {
+        // Calculate facade line length
+        totalDistance = DroneMappingEngine.calculateTotalDistance(
+                listenables.flightLine?.points ?? [])
+            .round();
+        area = 0; // Facade missions don't have an area in the traditional sense
+      } else if (listenables.orbitMode && listenables.orbitPoi != null) {
         // Calculate orbit circumference
         totalDistance = (2 * 3.14159 * listenables.orbitRadius).round();
         area = 0; // Orbit missions don't have an area
@@ -44,7 +50,7 @@ class _InfoState extends State<Info> {
       return Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (!listenables.orbitMode) ...[
+          if (!listenables.orbitMode && !listenables.facadeMode) ...[
             SwitchListTile(
                 title: const Text("Create Photo Points"),
                 value: listenables.createCameraPoints,
@@ -69,7 +75,7 @@ class _InfoState extends State<Info> {
                     listenables.fillGrid = value;
                   });
                 }),
-          ] else ...[
+          ] else if (listenables.orbitMode) ...[
             SwitchListTile(
                 title: const Text("Create Photo Points"),
                 subtitle: const Text("Take photos at each orbit waypoint"),
@@ -81,6 +87,24 @@ class _InfoState extends State<Info> {
                 }),
             SwitchListTile(
                 title: const Text("Show Orbit Points"),
+                value: listenables.showPoints,
+                onChanged: (value) {
+                  setState(() {
+                    listenables.showPoints = value;
+                  });
+                }),
+          ] else if (listenables.facadeMode) ...[
+            SwitchListTile(
+                title: const Text("Create Photo Points"),
+                subtitle: const Text("Take photos at each facade waypoint"),
+                value: listenables.createCameraPoints,
+                onChanged: (value) {
+                  setState(() {
+                    listenables.createCameraPoints = value;
+                  });
+                }),
+            SwitchListTile(
+                title: const Text("Show Facade Points"),
                 value: listenables.showPoints,
                 onChanged: (value) {
                   setState(() {
@@ -101,9 +125,14 @@ class _InfoState extends State<Info> {
               const Divider(),
               Text("Flight distance: $totalDistance m",
                   style: const TextStyle(fontSize: 16)),
-              if (!listenables.orbitMode) ...[
+              if (!listenables.orbitMode && !listenables.facadeMode) ...[
                 const Divider(),
                 Text("Area: $area m²", style: const TextStyle(fontSize: 16)),
+              ],
+              if (listenables.facadeMode) ...[
+                const Divider(),
+                Text("Facade height: ${listenables.facadeHeight} m", 
+                    style: const TextStyle(fontSize: 16)),
               ],
               const Divider(),
               Text(

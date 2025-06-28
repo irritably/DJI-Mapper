@@ -16,6 +16,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart' hide Action;
 import 'package:provider/provider.dart';
+import 'dart:math' as math;
 
 class ExportBar extends StatefulWidget {
   const ExportBar({super.key});
@@ -221,12 +222,19 @@ class ExportBarState extends State<ExportBar> {
         actions.add(litchi.Action(actionType: litchi.ActionType.takePhoto));
       }
 
+      // Calculate heading for facade missions
+      double? heading;
+      if (listenables.facadeMode && listenables.facadeLine.length >= 2) {
+        heading = _calculateFacadeHeading(listenables.facadeLine, photoLocation);
+      }
+
       waypoints.add(litchi.Waypoint(
         latitude: photoLocation.latitude,
         longitude: photoLocation.longitude,
         altitude: listenables.altitude,
         speed: listenables.speed.toInt(),
-        gimbalPitch: listenables.cameraAngle,
+        heading: heading,
+        gimbalPitch: listenables.facadeMode ? listenables.facadeCameraPitch : listenables.cameraAngle,
         gimbalMode: _getLitchiGimbalMode(listenables),
         poi: _getLitchiPoi(listenables),
         actions: actions,
@@ -234,6 +242,76 @@ class ExportBarState extends State<ExportBar> {
     }
 
     return waypoints;
+  }
+
+  double _calculateFacadeHeading(List<LatLng> facadeLine, LatLng waypoint) {
+    // Find the closest segment on the facade line and calculate perpendicular heading
+    double minDistance = double.infinity;
+    double heading = 0;
+
+    for (int i = 0; i < facadeLine.length - 1; i++) {
+      LatLng p1 = facadeLine[i];
+      LatLng p2 = facadeLine[i + 1];
+      
+      // Calculate bearing of the facade segment
+      double facadeBearing = _calculateBearing(p1, p2);
+      
+      // Perpendicular heading (90 degrees to the facade)
+      double perpHeading = (facadeBearing + 90) % 360;
+      
+      // Calculate distance from waypoint to this segment
+      double distance = _distanceToLineSegment(waypoint, p1, p2);
+      
+      if (distance < minDistance) {
+        minDistance = distance;
+        heading = perpHeading;
+      }
+    }
+
+    return heading;
+  }
+
+  double _calculateBearing(LatLng from, LatLng to) {
+    double lat1 = from.latitude * math.pi / 180;
+    double lat2 = to.latitude * math.pi / 180;
+    double deltaLng = (to.longitude - from.longitude) * math.pi / 180;
+
+    double y = math.sin(deltaLng) * math.cos(lat2);
+    double x = math.cos(lat1) * math.sin(lat2) - math.sin(lat1) * math.cos(lat2) * math.cos(deltaLng);
+
+    double bearing = math.atan2(y, x) * 180 / math.pi;
+    return (bearing + 360) % 360;
+  }
+
+  double _distanceToLineSegment(LatLng point, LatLng lineStart, LatLng lineEnd) {
+    // Simplified distance calculation - in a real implementation you'd want more precision
+    double A = point.latitude - lineStart.latitude;
+    double B = point.longitude - lineStart.longitude;
+    double C = lineEnd.latitude - lineStart.latitude;
+    double D = lineEnd.longitude - lineStart.longitude;
+
+    double dot = A * C + B * D;
+    double lenSq = C * C + D * D;
+    
+    if (lenSq == 0) return math.sqrt(A * A + B * B);
+    
+    double param = dot / lenSq;
+    
+    double xx, yy;
+    if (param < 0) {
+      xx = lineStart.latitude;
+      yy = lineStart.longitude;
+    } else if (param > 1) {
+      xx = lineEnd.latitude;
+      yy = lineEnd.longitude;
+    } else {
+      xx = lineStart.latitude + param * C;
+      yy = lineStart.longitude + param * D;
+    }
+
+    double dx = point.latitude - xx;
+    double dy = point.longitude - yy;
+    return math.sqrt(dx * dx + dy * dy);
   }
 
   litchi.GimbalMode _getLitchiGimbalMode(ValueListenables listenables) {
@@ -264,11 +342,12 @@ class ExportBarState extends State<ExportBar> {
       
       // Set gimbal angle on first waypoint
       if (id == 0) {
+        int gimbalPitch = listenables.facadeMode ? listenables.facadeCameraPitch : listenables.cameraAngle;
         actions.add(Action(
           id: id,
           actionFunction: ActionFunction.gimbalEvenlyRotate,
           actionParams: GimbalRotateParams(
-            pitch: listenables.cameraAngle.toDouble(),
+            pitch: gimbalPitch.toDouble(),
             payloadPosition: 0,
           ),
         ));
@@ -300,7 +379,7 @@ class ExportBarState extends State<ExportBar> {
         index: id,
         height: listenables.altitude,
         speed: listenables.speed,
-        headingParam: _getDjiHeadingParam(listenables),
+        headingParam: _getDjiHeadingParam(listenables, photoLocation),
         turnParam: TurnParam(
           waypointTurnMode: WaypointTurnMode.toPointAndStopWithDiscontinuityCurvature,
           turnDampingDistance: 0,
@@ -320,7 +399,7 @@ class ExportBarState extends State<ExportBar> {
     return placemarks;
   }
 
-  HeadingParam _getDjiHeadingParam(ValueListenables listenables) {
+  HeadingParam _getDjiHeadingParam(ValueListenables listenables, LatLng waypoint) {
     if (listenables.orbitMode && listenables.orbitFacePoi && listenables.orbitPoi != null) {
       return HeadingParam(
         headingMode: HeadingMode.towardPOI,
@@ -331,6 +410,17 @@ class ExportBarState extends State<ExportBar> {
           latitude: listenables.orbitPoi!.latitude,
           height: listenables.altitude.toDouble(),
         ),
+      );
+    }
+    
+    if (listenables.facadeMode && listenables.facadeLine.length >= 2) {
+      // Calculate heading to face the facade
+      double heading = _calculateFacadeHeading(listenables.facadeLine, waypoint);
+      return HeadingParam(
+        headingMode: HeadingMode.fixed,
+        headingPathMode: HeadingPathMode.followBadArc,
+        headingAngleEnable: true,
+        headingAngle: heading.round(),
       );
     }
     
@@ -554,7 +644,7 @@ class ExportBarState extends State<ExportBar> {
                   onPressed: () => _exportForLithi(listenables),
                   child: const Text("Save as Litchi Mission")),
             ),
-            if (!listenables.orbitMode) ...[
+            if (!listenables.orbitMode && !listenables.facadeMode) ...[
               const Padding(
                 padding: EdgeInsets.all(8.0),
                 child: Text("Import/Export Mapping Area",
